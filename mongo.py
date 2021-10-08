@@ -130,13 +130,14 @@ class MongoGetter:
 
 class AsyncMongo(MongoBase):
 
-    def __init__(self, config: dict, *, db: str = None, collect: str=None, logger: Logger = logger) -> None:
-        super().__init__(config, db_name=db, collect_name=collect, is_async=True)
+    def __init__(self, config: dict, collect_name: str=None, db_name: str = None, *,  logger: Logger = logger) -> None:
+        super().__init__(config, db_name=db_name, collect_name=collect_name, is_async=True)
         self.logger = logger
 
-    def geteer(self, collect_name: str, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
+    def geteer(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
         """ 异步迭代查询 """
-        return MongoGetter(self.db[collect_name], logger=self.logger, filter=filter, return_fields=return_fields,
+        collect = self.db[collect_name] if collect_name is None else self.collect
+        return MongoGetter(collect, logger=self.logger, filter=filter, return_fields=return_fields,
                            total_cnt=total_cnt, page_size=page_size, retry=retry)
 
     async def write(self, collect_name:str, documents: List[dict], retry:int=5):
@@ -156,19 +157,19 @@ class AsyncMongo(MongoBase):
                     raise
                 await asyncio.sleep(2)
 
-    async def find_one(self, coll, filter, retry=3, raise_error=True):
+    async def find_one(self, collect_name, filter, retry=3, raise_error=True):
         try:
-            data = await self.client[coll].find_one(filter)
+            data = await self.db[collect_name].find_one(filter)
             return data
         except:
             if retry:
-                return await self.find_one(coll, filter, retry - 1, raise_error)
+                return await self.find_one(collect_name, filter, retry - 1, raise_error)
             elif raise_error:
                 raise
 
-    async def fetch_all(self, coll, filter, return_fields=None, retry=3, raise_error=True):
+    async def fetch_all(self, collect_name, filter, return_fields=None, retry=3, raise_error=True):
         data = []
-        cursor = self.client[coll].find(filter, return_fields)
+        cursor = self.db[collect_name].find(filter, return_fields)
         for i in range(retry):
             try:
                 async for document in cursor:
