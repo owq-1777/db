@@ -10,6 +10,7 @@
 
 import asyncio
 import traceback
+from datetime import time
 from logging import Logger
 from typing import List
 
@@ -32,7 +33,7 @@ class MongoTool:
 
 class MongoBase:
 
-    def __init__(self, config: dict, *, db_name: str = None, collect_name: str = None, is_async=False) -> None:
+    def __init__(self, config: dict, *, db_name: str = None, collect_name: str = None, is_async=False,logger: Logger=logger) -> None:
         """ Mongo 连接数据库基类
 
         :Parameters:
@@ -53,6 +54,7 @@ class MongoBase:
         self.client = self.get_async_client(self.conn_str) if is_async else self.get_client(self.conn_str)
         self.db: database.Database = self.client[config['database']] if db_name is None else self.client[db_name]
         self.collect = None if collect_name is None else self.db[collect_name]
+        self.logger = logger
 
     @staticmethod
     def get_conn_str(config: dict) -> str:
@@ -70,6 +72,23 @@ class MongoBase:
     def get_async_client(conn_str: str, timeout: int = 5000):
         """ create mongo async client """
         return motor.motor_asyncio.AsyncIOMotorClient(conn_str, serverSelectionTimeoutMS=timeout)
+
+    def write(self, collect_name:str, data: List[dict], retry=5):
+        """ 批量写入文档 """
+
+        collect = self.db[collect_name]
+        documents = [UpdateOne({'_id': each['_id']}, {'$set': each}, upsert=True) for each in data]
+
+        for i in range(retry):
+            try:
+                resp = collect.bulk_write(documents)
+                self.logger.info(f'success updata {resp.upserted_count}, matched {resp.matched_count} documents to {collect.full_name}, total write {len(documents)}')
+                return resp
+            except Exception as e:
+                if i + 1 == retry:
+                    self.logger.error('write lose! {e}')
+                    raise
+                time.sleep(2)
 
 
 class MongoGetter:
@@ -132,7 +151,6 @@ class AsyncMongo(MongoBase):
 
     def __init__(self, config: dict, collect_name: str=None, db_name: str = None, *,  logger: Logger = logger) -> None:
         super().__init__(config, db_name=db_name, collect_name=collect_name, is_async=True)
-        self.logger = logger
 
     def geteer(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
         """ 异步迭代查询 """
@@ -153,7 +171,7 @@ class AsyncMongo(MongoBase):
                 return resp
             except Exception as e:
                 if i + 1 == retry:
-                    self.logger.error('weite lose! {e}')
+                    self.logger.error('write lose! {e}')
                     raise
                 await asyncio.sleep(2)
 
