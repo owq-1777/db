@@ -60,7 +60,13 @@ class MongoBase:
     def get_conn_str(config: dict) -> str:
         """get mongo connection string  """
         if config.get('password'):
+<<<<<<< HEAD
             return 'mongodb://{username}:{password}@{host}:{port}/{database}'.format(**config)
+=======
+            if config.get('database'):
+                return 'mongodb://{username}:{password}@{host}:{port}/{database}'.format(**config)
+            return 'mongodb://{username}:{password}@{host}:{port}'.format(**config)
+>>>>>>> 3a6c2536888d77da76d733a4f2ee801bf208dc03
         else:
             return 'mongodb://{host}:{port}'.format(**config)
 
