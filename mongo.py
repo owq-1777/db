@@ -9,8 +9,8 @@
 '''
 
 import asyncio
+import time
 import traceback
-from datetime import time
 from logging import Logger
 from typing import List
 
@@ -48,7 +48,7 @@ class MongoBase:
             }
             - `db`: 连接数据库, 默认使用config中数据库
             - `collect`: 连接的采集表名, 默认为空
-            - `is_async`: 是否使用异步连接, 模式False
+            - `is_async`: 是否使用异步连接, 默认False
         """
         self.conn_str = self.get_conn_str(config)
         self.client = self.get_async_client(self.conn_str) if is_async else self.get_client(self.conn_str)
@@ -60,7 +60,7 @@ class MongoBase:
     def get_conn_str(config: dict) -> str:
         """get mongo connection string  """
         if config.get('password'):
-            return 'mongodb://{username}:{password}@{host}:{port}'.format(**config)
+            return 'mongodb://{username}:{password}@{host}:{port}/{database}'.format(**config)
         else:
             return 'mongodb://{host}:{port}'.format(**config)
 
@@ -154,7 +154,7 @@ class AsyncMongo(MongoBase):
 
     def geteer(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
         """ 异步迭代查询 """
-        collect = self.db[collect_name] if collect_name is None else self.collect
+        collect = self.db[collect_name] if collect_name else self.collect
         return MongoGetter(collect, logger=self.logger, filter=filter, return_fields=return_fields,
                            total_cnt=total_cnt, page_size=page_size, retry=retry)
 
