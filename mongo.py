@@ -108,7 +108,6 @@ class MongoGetter:
             self.projection['_id'] = 0
 
         self.cursor = cursor if cursor else self.collect.find(self.filter, self.projection)
-
         self.total_cnt = total_cnt  # 取的数据总量, 默认取全部
         self.page_size = page_size  # 单次返回的数据量
         self.fetch_cnt = 0          # 已获取的数据量
