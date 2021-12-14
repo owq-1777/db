@@ -117,7 +117,7 @@ class MongoGetter:
         data = []
 
         if self.total_cnt is None:
-            self.total_cnt = await MongoTool.get_total_count(self.collect)
+            self.total_cnt = await MongoTool.get_total_count(self.collect, self.filter)
 
         async for document in self.cursor:
 
@@ -153,7 +153,7 @@ class AsyncMongo(MongoBase):
     def __init__(self, config: dict, collect_name: str=None, db_name: str = None, *,  logger: Logger = logger) -> None:
         super().__init__(config, db_name=db_name, collect_name=collect_name, is_async=True)
 
-    def geteer(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
+    def getter(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
         """ 异步迭代查询 """
         collect = self.db[collect_name] if collect_name else self.collect
         return MongoGetter(collect, logger=self.logger, filter=filter, return_fields=return_fields,
