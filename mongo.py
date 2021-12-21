@@ -104,10 +104,8 @@ class MongoGetter:
 
         self.filter = filter or {}
         self.projection = dict.fromkeys(return_fields, 1) if return_fields else {}
-        if not self.projection.get('_id'):
-            self.projection['_id'] = 0
-
-        self.cursor = cursor if cursor else self.collect.find(self.filter, self.projection)
+        self.cursor = self.collect.find(self.filter, self.projection) if self.projection else self.collect.find(self.filter)
+        self.cursor = cursor if cursor else self.cursor
         self.total_cnt = total_cnt  # 取的数据总量, 默认取全部
         self.page_size = page_size  # 单次返回的数据量
         self.fetch_cnt = 0          # 已获取的数据量
