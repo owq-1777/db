@@ -1,201 +1,170 @@
 #!/usr/bin/env python3
 # -*- encoding: utf-8 -*-
 '''
-@File   :   mongo.py
-@Time   :   2021/09/03 11:35
+@File   :   mongo_async.py
+@Time   :   2021/12/21 16:19
 @Author :   Blank
-@Version:   1.0
-@Desc   :   Mongo async class
+@Version:   2.0
+@Desc   :   Mongo pcblib
 '''
 
-import asyncio
-import time
-import traceback
-from logging import Logger
-from typing import List
+from typing import Sequence
 
 import motor.motor_asyncio
+import pymongo
 from loguru import logger
-from pymongo import UpdateOne, database
 from pymongo.collection import Collection
-from pymongo.cursor import Cursor
-from pymongo.mongo_client import MongoClient
+from pymongo.database import Database
+from pymongo.errors import BulkWriteError
+from pymongo.operations import InsertOne, UpdateOne
 
 
-class MongoTool:
+class AsyncMongoDB:
 
-    @staticmethod
-    async def get_total_count(collect: Collection, filter: dict = {}):
-        """ Get the number of documents according to the filter. """
-        # 没有设置过滤器时, 使用 estimated_document_count() 查询大型集合会更快
-        return await collect.count_documents(filter) if filter else await collect.estimated_document_count()
+    def __init__(self, url: str = None, host: str = 'localhost', port: int = 27017,
+                 database: str = 'admin', username: str = None, password: str = None, **kwargs):
+        """Get a database by url or conf.
 
-
-class MongoBase:
-
-    def __init__(self, config: dict, *, db_name: str = None, collect_name: str = None, is_async=False,logger: Logger=logger) -> None:
-        """ Mongo 连接数据库基类
-
-        :Parameters:
-            - `config`: 连接配置
-            示例:
-            {
-                'host': 127.0.0.1,
-                'port': 27017,
-                'password': '123456',
-                'username': 'admin',
-                'database': 'admin'
-            }
-            - `db`: 连接数据库, 默认使用config中数据库
-            - `collect`: 连接的采集表名, 默认为空
-            - `is_async`: 是否使用异步连接, 默认False
+        Args:
+            host (str, optional): host. Defaults to 'localhost'.
+            port (int, optional): port. Defaults to 27017.
+            database (str, optional): database name. Defaults to 'admin'.
+            username (str, optional): user name. Defaults to None.
+            password (str, optional): password. Defaults to None.
+            url (str, optional): mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]][/[database][?options]]. Defaults to None.
         """
-        self.conn_str = self.get_conn_str(config)
-        self.client = self.get_async_client(self.conn_str) if is_async else self.get_client(self.conn_str)
-        self.db: database.Database = self.client[config['database']] if db_name is None else self.client[db_name]
-        self.collect = None if collect_name is None else self.db[collect_name]
-        self.logger = logger
 
-    @staticmethod
-    def get_conn_str(config: dict) -> str:
-        """get mongo connection string  """
-        if config.get('password'):
-            if config.get('database'):
-                return 'mongodb://{username}:{password}@{host}:{port}/{database}'.format(**config)
-            return 'mongodb://{username}:{password}@{host}:{port}'.format(**config)
+        if url:
+            self.client = self.get_client(url, **kwargs)
         else:
-            return 'mongodb://{host}:{port}'.format(**config)
+            if password != None or username != None:
+                self.client = self.get_client(host=host, port=port, username=username, password=password, authSource=database, **kwargs)
+            else:
+                self.client = self.get_client(host=host, port=port, **kwargs)
+
+        self.db = self.get_database(database)
+
+    def __str__(self) -> str:
+        return f'self.db: {self.db}'
 
     @staticmethod
-    def get_client(conn_str: str):
-        return MongoClient(conn_str)
+    def get_client(*args, **kwargs):
+        """ Getting mongo async client. """
+        return motor.motor_asyncio.AsyncIOMotorClient(*args, **kwargs)
 
-    @staticmethod
-    def get_async_client(conn_str: str, timeout: int = 5000):
-        """ create mongo async client """
-        return motor.motor_asyncio.AsyncIOMotorClient(conn_str, serverSelectionTimeoutMS=timeout)
+    def get_database(self, database_name: str) -> Database:
+        """ Getting database object. """
+        return self.client[database_name]
 
-    def write(self, collect_name:str, data: List[dict], retry=5):
-        """ 批量写入文档 """
+    def get_collection(self, coll_name: str, **kwargs) -> Collection:
+        """ Getting collection object. """
+        return self.db.get_collection(coll_name, **kwargs)
 
-        collect = self.db[collect_name]
-        documents = [UpdateOne({'_id': each['_id']}, {'$set': each}, upsert=True) for each in data]
+    async def create_index(self, coll_name: str, keys: Sequence, sort: int = 1, unique=True):
+        """Creates an index on this collection.
 
-        for i in range(retry):
-            try:
-                resp = collect.bulk_write(documents)
-                self.logger.info(f'success updata {resp.upserted_count}, matched {resp.matched_count} documents to {collect.full_name}, total write {len(documents)}')
-                return resp
-            except Exception as e:
-                if i + 1 == retry:
-                    self.logger.error('write lose! {e}')
-                    raise
-                time.sleep(2)
+        Args:
+            coll_name ([type]): collection name
+            keys (Sequence): The key that creates the index(Single or compound)
+            sort (int, optional): 1=Ascending, -1=Descending. Defaults to 1.
+            unique (bool, optional): [description]. Defaults to True.
 
+        """
+        coll = self.get_collection(coll_name)
+        sort_type = pymongo.ASCENDING if sort == 1 else pymongo.DESCENDING
+        _keys = [(key, sort_type) for key in keys]
 
-class MongoGetter:
+        await coll.create_index(_keys, unique=unique)
 
-    def __init__(self, collect: Collection, logger: Logger = logger,
-                 cursor: Cursor = None, filter: dict = None, return_fields: list = None,
-                 total_cnt: int = None, page_size: int = 500, retry: int = 5) -> None:
-        """ Mongo 分页查询异步迭代器 """
-        self.collect = collect
-        self.logger = logger
+    async def get_index_info(self, coll_name: str):
+        """ Getting collection index information. """
+        return await self.get_collection(coll_name).index_information()
 
-        self.filter = filter or {}
-        self.projection = dict.fromkeys(return_fields, 1) if return_fields else {}
-        self.cursor = self.collect.find(self.filter, self.projection) if self.projection else self.collect.find(self.filter)
-        self.cursor = cursor if cursor else self.cursor
-        self.total_cnt = total_cnt  # 取的数据总量, 默认取全部
-        self.page_size = page_size  # 单次返回的数据量
-        self.fetch_cnt = 0          # 已获取的数据量
-        self.retry = retry          # 获取失败重试次数
+    async def del_collection(self, coll_name: str):
+        """ Delete specified collection. """
+        return await self.db.drop_collection(coll_name)
 
-    async def get_data(self):
-        data = []
+    async def write(self, coll_name: str, documents: list[dict]) -> bool:
+        """Batch write documents.
 
-        if self.total_cnt is None:
-            self.total_cnt = await MongoTool.get_total_count(self.collect, self.filter)
+        Args:
+            coll_name (str): collection name.basename
+            documents (list[dict]): write documents.
+        Returns:
+            bool: operating result.
+        """
 
-        async for document in self.cursor:
+        collect = self.get_collection(coll_name)
 
-            data.append(document)
-            self.fetch_cnt += 1
-
-            if len(data) >= self.page_size or self.fetch_cnt >= self.total_cnt:
-                return data
-
-        raise StopAsyncIteration
-
-    async def __anext__(self, retry=1):
-        try:
-            return await self.get_data()
-
-        except StopAsyncIteration:
-            raise StopAsyncIteration
-        except Exception:
-            self.logger.error(traceback.format_exc())
-
-            if self.retry > retry:
-                await asyncio.sleep(2)
-                return await self.__anext__(retry + 1)
+        operate_list = []
+        for item in documents:
+            if item.get('_id') != None:
+                operate_list.append(UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True))
             else:
-                raise
+                operate_list.append(InsertOne(item))
 
-    def __aiter__(self):
-        return self
-
-
-class AsyncMongo(MongoBase):
-
-    def __init__(self, config: dict, collect_name: str=None, db_name: str = None, *,  logger: Logger = logger) -> None:
-        super().__init__(config, db_name=db_name, collect_name=collect_name, is_async=True)
-
-    def getter(self, collect_name: str = None, filter: dict = None, return_fields: list = None, total_cnt: int = None, page_size: int = 500, retry: int = 5):
-        """ 异步迭代查询 """
-        collect = self.db[collect_name] if collect_name else self.collect
-        return MongoGetter(collect, logger=self.logger, filter=filter, return_fields=return_fields,
-                           total_cnt=total_cnt, page_size=page_size, retry=retry)
-
-    async def write(self, collect_name:str, documents: List[dict], retry:int=5):
-        """ 批量写入文档 """
-
-        collect = self.db[collect_name]
-        documents = [UpdateOne({'_id': each['_id']}, {'$set': each}, upsert=True) for each in documents]
-
-        for i in range(retry):
-            try:
-                resp = await collect.bulk_write(documents)
-                self.logger.info(f'success updata {resp.upserted_count}, matched {resp.matched_count} documents to {collect.full_name}, total write {len(documents)}')
-                return resp
-            except Exception as e:
-                if i + 1 == retry:
-                    self.logger.error('write lose! {e}')
-                    raise
-                await asyncio.sleep(2)
-
-    async def find_one(self, collect_name, filter, retry=3, raise_error=True):
         try:
-            data = await self.db[collect_name].find_one(filter)
-            return data
-        except:
-            if retry:
-                return await self.find_one(collect_name, filter, retry - 1, raise_error)
-            elif raise_error:
-                raise
+            result = await collect.bulk_write(operate_list, ordered=False)
+            logger.info(f'mongo: {collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
+            return True
+        except BulkWriteError as bwe:
+            logger.error(bwe.details)
+            return False
 
-    async def fetch_all(self, collect_name, filter, return_fields=None, retry=3, raise_error=True):
-        data = []
-        cursor = self.db[collect_name].find(filter, return_fields)
-        for i in range(retry):
-            try:
-                async for document in cursor:
-                    data.append(document)
-            except Exception as e:
-                self.logger.error(e)
-                if i + 1 >= retry and raise_error:
-                    raise
-            else:
+    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None, total_cnt: int = 'all', page_size: int = 500):
+        """ Batch getting document builder.
+
+        Args:
+            coll_name (str): collection name.
+            filter (dict, optional): filter condition. Defaults to {}.
+            return_fields (list, optional): select the fields to return. Defaults to None.
+            total_cnt (int, optional): getting document total quantity. Defaults to all.
+            page_size (int, optional): quantity returned each time. Defaults to 500.
+
+        Yields:
+            Iterator[list[dict]]: Documents.
+        """
+
+        collect = self.get_collection(coll_name)
+
+        projection = dict.fromkeys(return_fields, 1) if return_fields else None
+        cursor = collect.find(filter, projection) if projection else collect.find(filter)
+
+        if total_cnt == 'all':
+            total_cnt = await collect.count_documents(filter)
+
+        fetch_cnt = 0
+        item_list = []
+        async for item in cursor:
+            item_list.append(item)
+
+            fetch_cnt += 1
+            if fetch_cnt == total_cnt:
                 break
-        await cursor.close()
-        return data
+
+            if len(item_list) == page_size:
+                logger.debug(f'mongo: {collect.full_name} | getter {fetch_cnt}/{total_cnt}')
+                yield item_list
+                item_list = []
+
+        if item_list:
+            logger.debug(f'mongo: {collect.full_name} | getter {fetch_cnt}/{total_cnt}')
+            yield item_list
+
+    async def rename_collection(self, old_name: str, new_name: str):
+        """ Rename this collection. """
+        collect = self.get_collection(old_name)
+        await collect.rename(new_name)
+
+    async def copy_collect(self, old_name: str, new_name: str):
+        """ Copy the collection to the new a collection. """
+        async for items in self.getter(old_name, page_size=2500):
+            await self.write(new_name, items)
+
+
+# ------------------------------------ Other operation ------------------------------------ #
+
+
+def get_array_add_operation(_id, field: str, data: Sequence):
+    """ Gets the add array element operation """
+    return UpdateOne({'_id': _id}, {'$addToSet': {field: {'$each': data}}})
