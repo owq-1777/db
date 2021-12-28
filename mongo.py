@@ -47,18 +47,28 @@ class AsyncMongoDB:
     def __str__(self) -> str:
         return f'db: {self.db}'
 
+
+# ------------------------------------  ------------------------------------ #
+
+
     @staticmethod
     def get_client(*args, **kwargs):
-        """ Getting mongo async client. """
+        """ Get mongo async client. """
         return motor.motor_asyncio.AsyncIOMotorClient(*args, **kwargs)
 
     def get_database(self, database_name: str) -> Database:
-        """ Getting database object. """
+        """ Get database object. """
         return self.client[database_name]
 
     def get_collection(self, coll_name: str, **kwargs) -> Collection:
-        """ Getting collection object. """
+        """ Get collection object. """
         return self.db.get_collection(coll_name, **kwargs)
+
+    async def get_collection_list(self) -> list:
+        """ Get collection names list"""
+        return await self.db.list_collection_names()
+
+# ------------------------------------  ------------------------------------ #
 
     async def create_index(self, coll_name: str, keys: Sequence, sort: int = 1, unique=True):
         """Creates an index on this collection.
@@ -77,12 +87,17 @@ class AsyncMongoDB:
         await coll.create_index(_keys, unique=unique)
 
     async def get_index_info(self, coll_name: str):
-        """ Getting collection index information. """
+        """ Get collection index information. """
         return await self.get_collection(coll_name).index_information()
 
     async def del_collection(self, coll_name: str):
         """ Delete specified collection. """
         return await self.db.drop_collection(coll_name)
+
+    async def get_count(self, coll_name: str, filter: dict = {}):
+        """ Get the number of collection documents. """
+        collect = self.get_collection(coll_name)
+        return await collect.count_documents(filter) if filter else await collect.estimated_document_count()
 
     async def write(self, coll_name: str, documents: list[dict]) -> bool:
         """Batch write documents.
@@ -105,20 +120,21 @@ class AsyncMongoDB:
 
         try:
             result = await collect.bulk_write(operate_list, ordered=False)
-            logger.info(f'mongo: {collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
+            logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
         except BulkWriteError as bwe:
             logger.error(bwe.details)
             return False
 
-    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None, total_cnt: int = 'all', page_size: int = 500):
-        """ Batch getting document builder.
+    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
+                     return_cnt: int = 'all', page_size: int = 500, page_id=''):
+        """ Batch get document builder.
 
         Args:
             coll_name (str): collection name.
-            filter (dict, optional): filter condition. Defaults to {}.
+            filter (dict, optional): filter condition. Defaults to None.
             return_fields (list, optional): select the fields to return. Defaults to None.
-            total_cnt (int, optional): getting document total quantity. Defaults to all.
+            return_cnt (int, optional): getting document total quantity. Defaults to all.
             page_size (int, optional): quantity returned each time. Defaults to 500.
 
         Yields:
@@ -126,30 +142,38 @@ class AsyncMongoDB:
         """
 
         collect = self.get_collection(coll_name)
-
         projection = dict.fromkeys(return_fields, 1) if return_fields else None
-        cursor = collect.find(filter, projection) if projection else collect.find(filter)
 
-        if total_cnt == 'all':
-            total_cnt = await collect.count_documents(filter)
+        total_cnt = await self.get_count(coll_name, filter)  # 查询总数量
+        return_cnt = total_cnt if return_cnt == 'all' or return_cnt > total_cnt else return_cnt  # 返回总数量
+        fetch_cnt = 0   # 已查询数量
 
-        fetch_cnt = 0
+        # _id 分页查询
+        filter = {'$and': [{'_id': {'$gt': page_id}}, filter]}
         item_list = []
-        async for item in cursor:
-            item_list.append(item)
+        while True:
 
-            fetch_cnt += 1
-            if fetch_cnt == total_cnt:
+            # 最后一页处理
+            if fetch_cnt+page_size > return_cnt:
+                cache_size = return_cnt-fetch_cnt
+            else:
+                cache_size = page_size*50 if return_cnt < page_size*50 else return_cnt
+
+            # limit限制游标大小 防止服务器暴毙
+            cursor = collect.find(filter, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
+
+            async for item in cursor:
+                item_list.append(item)
+                fetch_cnt += 1
+                if len(item_list) == page_size or fetch_cnt == return_cnt:
+                    _id = item_list[-1]['_id']
+                    yield item_list
+                    item_list = []
+
+            logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.3f}% | page id: {_id[:6]}')
+            if fetch_cnt == return_cnt:
                 break
-
-            if len(item_list) == page_size:
-                logger.debug(f'mongo: {collect.full_name} | getter {fetch_cnt}/{total_cnt}')
-                yield item_list
-                item_list = []
-
-        if item_list:
-            logger.debug(f'mongo: {collect.full_name} | getter {fetch_cnt}/{total_cnt}')
-            yield item_list
+            filter['$and'][0]['_id']['$gt'] = _id
 
     async def rename_collection(self, old_name: str, new_name: str):
         """ Rename this collection. """
@@ -165,6 +189,6 @@ class AsyncMongoDB:
 # ------------------------------------ Other operation ------------------------------------ #
 
 
-def get_array_add_operation(_id, field: str, data: Sequence):
-    """ Gets the add array element operation """
+def get_array_add_operation(_id: str, field: str, data: Sequence):
+    """ Get the add array element operation """
     return UpdateOne({'_id': _id}, {'$addToSet': {field: {'$each': data}}})

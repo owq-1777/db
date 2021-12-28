@@ -11,7 +11,8 @@
 from typing import Any, Dict, Union
 
 import aioredis
-from aioredis.connection import ConnectionPool  # pip install aioredis==2
+from aioredis.connection import ConnectionPool
+from loguru import logger  # pip install aioredis==2
 
 
 def get_asyn_redis(host: str = '127.0.0.1', port: int = 6379, password: str = None, db: Union[str, int] = 0, max_connections: int = 32, **kwargs):
@@ -123,6 +124,18 @@ class AsyncRedisDB(aioredis.Redis):
     async def zset_fetch_by_sorce(self, name: str,  min: int, max: int, num: int = None) -> list:
         """ 获取指定区间数据 """
         return await self.zrangebyscore(name, min, max, 0, num)
+
+    async def _write_zset(self, name:str, data:list, score:int=0):
+        result = await self.zadd(name, dict.fromkeys(data, score))
+        logger.debug(f'redis:{name} | insert {result} | updata {len(data)-result} | total {len(data)}')
+        return result
+
+    async def write(self,key_type:str, name:str, data:Union[str, list], score:int=0):
+        """  """
+        if key_type == 'zset':
+            return await self._write_zset(name, data, score)
+        else:
+            logger.error(f'param error | key_type:{key_type} | correct in [str,list,set,zset,hash]')
 
     async def get_conut(self, name:str):
         """ 获取数据量 """
