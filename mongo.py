@@ -45,7 +45,7 @@ class AsyncMongoDB:
         self.db = self.get_database(database)
 
     def __str__(self) -> str:
-        return f'self.db: {self.db}'
+        return f'db: {self.db}'
 
     @staticmethod
     def get_client(*args, **kwargs):

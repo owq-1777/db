@@ -174,8 +174,7 @@ class AsyncRedisDB(aioredis.Redis):
             yield item_list
 
         elif key_type == 'hash':
-            item_list = await self.hgetall(name)
-            yield item_list
+            yield await self.hgetall(name)
 
         else:
             yield False
