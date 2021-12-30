@@ -127,7 +127,7 @@ class AsyncMongoDB:
             return False
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
-                     return_cnt: int = 'all', page_size: int = 500, page_id=''):
+                     return_cnt: int = 'all', page_size: int = 500):
         """ Batch get document builder.
 
         Args:
@@ -145,35 +145,42 @@ class AsyncMongoDB:
         projection = dict.fromkeys(return_fields, 1) if return_fields else None
 
         total_cnt = await self.get_count(coll_name, filter)  # 查询总数量
-        return_cnt = total_cnt if return_cnt == 'all' or return_cnt > total_cnt else return_cnt  # 返回总数量
+        return_cnt = total_cnt if return_cnt == 'all' or return_cnt > total_cnt or return_cnt < 1 else return_cnt  # 返回总数量
         fetch_cnt = 0   # 已查询数量
 
         # _id 分页查询
-        filter = {'$and': [{'_id': {'$gt': page_id}}, filter]}
-        item_list = []
+        item_list, filters = [], filter
+        cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 服务器缓存大小
         while True:
 
-            # 最后一页处理
+            # 最后一页更新缓存大小
             if fetch_cnt+page_size > return_cnt:
                 cache_size = return_cnt-fetch_cnt
-            else:
-                cache_size = page_size*50 if return_cnt < page_size*50 else return_cnt
 
-            # limit限制游标大小 防止服务器暴毙
-            cursor = collect.find(filter, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
+            # * _id升序 限制缓存大小 防止服务器内存暴毙
+            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
 
             async for item in cursor:
                 item_list.append(item)
                 fetch_cnt += 1
-                if len(item_list) == page_size or fetch_cnt == return_cnt:
-                    _id = item_list[-1]['_id']
+                if len(item_list) == page_size:
                     yield item_list
-                    item_list = []
+                    page_id, item_list = item_list[-1]['_id'], []
 
-            logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.3f}% | page id: {_id[:6]}')
+            if item_list:
+                yield item_list
+                page_id = item_list[-1]['_id']
+
+            if fetch_cnt:
+                logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.3f}% | _id {type(page_id)}:{str(page_id)}')
+            else:
+                logger.warning(f'mongo:{collect.full_name} | query null {filter}')
+
             if fetch_cnt == return_cnt:
                 break
-            filter['$and'][0]['_id']['$gt'] = _id
+
+            # 更新查询条件
+            filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
 
     async def rename_collection(self, old_name: str, new_name: str):
         """ Rename this collection. """
