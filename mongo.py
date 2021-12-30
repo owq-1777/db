@@ -145,12 +145,12 @@ class AsyncMongoDB:
         projection = dict.fromkeys(return_fields, 1) if return_fields else None
 
         total_cnt = await self.get_count(coll_name, filter)  # 查询总数量
-        return_cnt = total_cnt if return_cnt == 'all' or return_cnt > total_cnt or return_cnt < 1 else return_cnt  # 返回总数量
+        return_cnt = total_cnt if return_cnt == 'all' or 0 > return_cnt > total_cnt else return_cnt  # 返回总数量
         fetch_cnt = 0   # 已查询数量
 
         # _id 分页查询
         item_list, filters = [], filter
-        cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 服务器缓存大小
+        cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
         while True:
 
             # 最后一页更新缓存大小
