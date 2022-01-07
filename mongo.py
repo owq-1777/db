@@ -13,10 +13,38 @@ from typing import Sequence
 import motor.motor_asyncio
 import pymongo
 from loguru import logger
+from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
-from pymongo.errors import BulkWriteError
+from pymongo.errors import BulkWriteError, ConnectionFailure
 from pymongo.operations import InsertOne, UpdateOne
+
+
+class MongoDB:
+
+    def __init__(self, url: str = None, host: str = 'localhost', port: int = 27017,
+                 database: str = 'admin', username: str = None, password: str = None, **kwargs) -> None:
+
+        if url:
+            self.client = MongoClient(url, **kwargs)
+        else:
+            if password != None and username != None:
+                self.client = MongoClient(host=host, port=port, username=username, password=password, authSource=database, **kwargs)
+            else:
+                self.client = MongoClient(host=host, port=port, **kwargs)
+
+        self.db = self.client.get_database(database)
+
+    def __str__(self) -> str:
+        return f'db: {self.db}'
+
+    def get_database(self, database_name: str):
+        """ Get database object. """
+        return self.client.get_database(database_name)
+
+    def get_collection(self, coll_name: str, **kwargs):
+        """ Get collection object. """
+        return self.db.get_collection(coll_name, **kwargs)
 
 
 class AsyncMongoDB:
@@ -37,7 +65,7 @@ class AsyncMongoDB:
         if url:
             self.client = self.get_client(url, **kwargs)
         else:
-            if password != None or username != None:
+            if password != None and username != None:
                 self.client = self.get_client(host=host, port=port, username=username, password=password, authSource=database, **kwargs)
             else:
                 self.client = self.get_client(host=host, port=port, **kwargs)
@@ -49,7 +77,6 @@ class AsyncMongoDB:
 
 
 # ------------------------------------  ------------------------------------ #
-
 
     @staticmethod
     def get_client(*args, **kwargs):
@@ -108,22 +135,19 @@ class AsyncMongoDB:
         Returns:
             bool: operating result.
         """
+        if not documents:
+            logger.warning('documents is null')
+            return True
 
-        collect = self.get_collection(coll_name)
-
-        operate_list = []
-        for item in documents:
-            if item.get('_id') != None:
-                operate_list.append(UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True))
-            else:
-                operate_list.append(InsertOne(item))
+        operate_list = [UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True) if item.get('_id') != None else InsertOne(item) for item in documents]
 
         try:
+            collect = self.get_collection(coll_name)
             result = await collect.bulk_write(operate_list, ordered=False)
             logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
-        except BulkWriteError as bwe:
-            logger.error(bwe.details)
+        except BulkWriteError as e:
+            logger.error(e.details)
             return False
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
