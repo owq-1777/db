@@ -17,7 +17,8 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import BulkWriteError, ConnectionFailure
-from pymongo.operations import InsertOne, UpdateOne
+from pymongo.operations import DeleteOne, InsertOne, UpdateOne
+from pymongo.results import BulkWriteResult
 
 
 class MongoDB:
@@ -130,7 +131,7 @@ class AsyncMongoDB:
         """Batch write documents.
 
         Args:
-            coll_name (str): collection name.basename
+            coll_name (str): collection name.
             documents (list[dict]): write documents.
         Returns:
             bool: operating result.
@@ -139,16 +140,45 @@ class AsyncMongoDB:
             logger.warning('documents is null')
             return True
 
+        # 有_id则更新数据 无则插入
         operate_list = [UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True) if item.get('_id') != None else InsertOne(item) for item in documents]
 
         try:
             collect = self.get_collection(coll_name)
-            result = await collect.bulk_write(operate_list, ordered=False)
+            result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
             logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
         except BulkWriteError as e:
             logger.error(e.details)
             return False
+
+    async def delect(self, coll_name: str, documents: list[dict]) -> bool:
+        """Delete mongo document data
+
+        Args:
+            coll_name (str):  collection name.
+            documents (list[dict]): delect documents.
+
+        Returns:
+            bool: operating result.
+        """
+
+        if not documents:
+            logger.warning('documents is null')
+            return True
+
+        # 根据_id删除数据
+        operate_list = [DeleteOne({'_id': i['_id']}) for i in documents if i.get('_id')]
+
+        try:
+            collect = self.get_collection(coll_name)
+            result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
+            logger.info(f'mongo:{collect.full_name} | deleted {result.deleted_count} | total {len(documents)}')
+            return True
+        except BulkWriteError as e:
+            logger.error(e.details)
+            return False
+
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
                      return_cnt: int = 'all', page_size: int = 500):
