@@ -16,7 +16,7 @@ from loguru import logger
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
-from pymongo.errors import BulkWriteError, ConnectionFailure
+from pymongo.errors import BulkWriteError
 from pymongo.operations import DeleteOne, InsertOne, UpdateOne
 from pymongo.results import BulkWriteResult
 
@@ -153,7 +153,7 @@ class AsyncMongoDB:
             return False
 
     async def delect(self, coll_name: str, documents: list[dict]) -> bool:
-        """Delete mongo document data
+        """Delete mongo document data.
 
         Args:
             coll_name (str):  collection name.
@@ -163,12 +163,12 @@ class AsyncMongoDB:
             bool: operating result.
         """
 
-        if not documents:
-            logger.warning('documents is null')
-            return True
-
         # 根据_id删除数据
         operate_list = [DeleteOne({'_id': i['_id']}) for i in documents if i.get('_id')]
+
+        if not operate_list:
+            logger.warning('documents no _id')
+            return True
 
         try:
             collect = self.get_collection(coll_name)
