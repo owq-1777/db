@@ -128,12 +128,14 @@ class AsyncMongoDB:
         collect = self.get_collection(coll_name)
         return await collect.count_documents(filter) if filter else await collect.estimated_document_count()
 
-    async def write(self, coll_name: str, documents: list[dict]) -> bool:
+    async def write(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
         """Batch write documents.
 
         Args:
             coll_name (str): collection name.
             documents (list[dict]): write documents.
+            log_switch (bool, optional): info level log switch. Defaults to True.
+
         Returns:
             bool: operating result.
         """
@@ -147,18 +149,19 @@ class AsyncMongoDB:
         try:
             collect = self.get_collection(coll_name)
             result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
-            logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
+            log_switch or logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
         except BulkWriteError as e:
             logger.error(e.details)
             return False
 
-    async def delect(self, coll_name: str, documents: list[dict]) -> bool:
+    async def delect(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
         """Delete mongo document data.
 
         Args:
             coll_name (str):  collection name.
             documents (list[dict]): delect documents.
+            log_switch (bool, optional): info level log switch. Defaults to True.
 
         Returns:
             bool: operating result.
@@ -174,14 +177,14 @@ class AsyncMongoDB:
         try:
             collect = self.get_collection(coll_name)
             result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
-            logger.info(f'mongo:{collect.full_name} | deleted {result.deleted_count} | total {len(documents)}')
+            log_switch or logger.info(f'mongo:{collect.full_name} | deleted {result.deleted_count} | total {len(documents)}')
             return True
         except BulkWriteError as e:
             logger.error(e.details)
             return False
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
-                     return_cnt: int = 'all', page_size: int = 500):
+                     return_cnt: int = 'all', page_size: int = 500, log_switch: bool = True):
         """ Batch get document builder.
 
         Args:
@@ -190,13 +193,14 @@ class AsyncMongoDB:
             return_fields (list, optional): select the fields to return. Defaults to None.
             return_cnt (int, optional): getting document total quantity. Defaults to all.
             page_size (int, optional): quantity returned each time. Defaults to 500.
+            log_switch (bool, optional): info level log switch. Defaults to True.
 
         Yields:
             Iterator[list[dict]]: Documents.
         """
 
         collect = self.get_collection(coll_name)
-        projection = dict.fromkeys(return_fields, 1) if return_fields else None # 返回字段
+        projection = dict.fromkeys(return_fields, 1) if return_fields else None  # 返回字段
 
         # 查询数量
         if (total_cnt := await self.get_count(coll_name, filter)) == 0:
@@ -226,7 +230,7 @@ class AsyncMongoDB:
             if item_list:
                 yield item_list
 
-            logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | total {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
+            log_switch or logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | total {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
 
             if fetch_cnt == return_cnt:
                 break
@@ -234,16 +238,16 @@ class AsyncMongoDB:
             # 更新查询条件
             filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
 
-
     async def rename_collection(self, old_name: str, new_name: str):
         """ Rename this collection. """
-        collect = self.get_collection(old_name)
-        await collect.rename(new_name)
+        # TODO admin权限判断处理
+        await self.get_collection(old_name).rename(new_name)
 
-    async def copy_collect(self, old_name: str, new_name: str):
+    async def copy_collection(self, old_name: str, new_name: str):
         """ Copy the collection to the new a collection. """
-        async for items in self.getter(old_name, page_size=2500):
-            await self.write(new_name, items)
+        async for items in self.getter(old_name, page_size=5000):
+            await self.write(new_name, items, log_switch=False)
+        logger.debug(f'{old_name} to {new_name} done!')
 
 
 # ------------------------------------ Other operation ------------------------------------ #
