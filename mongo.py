@@ -167,7 +167,7 @@ class AsyncMongoDB:
             bool: operating result.
         """
 
-        # 根据_id删除数据
+        # 根据_id删除的数据
         operate_list = [DeleteOne({'_id': i['_id']}) for i in documents if i.get('_id')]
 
         if not operate_list:
@@ -185,7 +185,7 @@ class AsyncMongoDB:
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
                      return_cnt: int = 'all', page_size: int = 500, log_switch: bool = True):
-        """ Batch get document builder.
+        """ Batch get document generator.
 
         Args:
             coll_name (str): collection name.
@@ -200,7 +200,6 @@ class AsyncMongoDB:
         """
 
         collect = self.get_collection(coll_name)
-        projection = dict.fromkeys(return_fields, 1) if return_fields else None  # 返回字段
 
         # 查询数量
         if (total_cnt := await self.get_count(coll_name, filter)) == 0:
@@ -212,6 +211,7 @@ class AsyncMongoDB:
 
         # * _id 升序分页查询 限制缓存大小 防止服务器内存暴毙
         fetch_cnt, item_list, filters = 0, [], filter
+        projection = dict.fromkeys(return_fields, 1) if return_fields else None # 返回字段
         cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
         while True:
 
@@ -245,9 +245,10 @@ class AsyncMongoDB:
 
     async def copy_collection(self, old_name: str, new_name: str):
         """ Copy the collection to the new a collection. """
+
         async for items in self.getter(old_name, page_size=5000):
             await self.write(new_name, items, log_switch=False)
-        logger.debug(f'{old_name} to {new_name} done!')
+        logger.debug(f'{old_name} copy to {new_name} done!')
 
 
 # ------------------------------------ Other operation ------------------------------------ #
