@@ -91,10 +91,6 @@ class AsyncMongoDB:
         """ Get collection object. """
         return self.db.get_collection(coll_name, **kwargs)
 
-    async def get_collection_list(self) -> list:
-        """ Get collection names list"""
-        return await self.db.list_collection_names()
-
     # ------------------------------------  ------------------------------------ #
 
     async def create_index(self, coll_name: str, keys: Sequence, sort: int = 1, unique=True):
@@ -117,14 +113,12 @@ class AsyncMongoDB:
         """ Get collection index information. """
         return await self.get_collection(coll_name).index_information()
 
-    async def del_collection(self, coll_name: str):
-        """ Delete specified collection. """
-        return await self.db.drop_collection(coll_name)
-
     async def get_count(self, coll_name: str, filter: dict = {}):
         """ Get the number of collection documents. """
         collect = self.get_collection(coll_name)
         return await collect.count_documents(filter) if filter else await collect.estimated_document_count()
+
+    # ------------------------------------ CRUD ------------------------------------ #
 
     async def write(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
         """Batch write documents.
@@ -249,7 +243,15 @@ class AsyncMongoDB:
         projection = dict.fromkeys(return_fields, 1) if return_fields else None
         return await self.get_collection(coll_name).find_one(filter, projection) or {}
 
-    # ------------------------------------  ------------------------------------ #
+    # ------------------------------------ collection ------------------------------------ #
+
+    async def get_collection_list(self) -> list:
+        """ Get collection names list"""
+        return await self.db.list_collection_names()
+
+    async def del_collection(self, coll_name: str):
+        """ Delete specified collection. """
+        return await self.db.drop_collection(coll_name)
 
     async def rename_collection(self, old_name: str, new_name: str):
         """ Rename this collection. """
@@ -261,7 +263,7 @@ class AsyncMongoDB:
 
         async for items in self.getter(old_name, page_size=5000):
             await self.write(new_name, items, log_switch=False)
-        logger.debug(f'{old_name} copy to {new_name} done!')
+        logger.info(f'{old_name} copy to {new_name} done!')
 
 
 # ------------------------------------ Other operation ------------------------------------ #
