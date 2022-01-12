@@ -141,7 +141,7 @@ class AsyncMongoDB:
         try:
             collect = self.get_collection(coll_name)
             result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
-            log_switch or logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
         except BulkWriteError as e:
             logger.error(e.details)
@@ -169,19 +169,19 @@ class AsyncMongoDB:
         try:
             collect = self.get_collection(coll_name)
             result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
-            log_switch or logger.info(f'mongo:{collect.full_name} | deleted {result.deleted_count} | total {len(documents)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | deleted {result.deleted_count} | total {len(documents)}')
             return True
         except BulkWriteError as e:
             logger.error(e.details)
             return False
 
-    async def getter(self, coll_name: str, filter: dict = None, return_fields: list = None,
+    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
                      return_cnt: int = 'all', page_size: int = 500, log_switch: bool = True):
         """ Batch get document generator.
 
         Args:
             coll_name (str): collection name.
-            filter (dict, optional): filter condition. Defaults to None.
+            filter (dict, optional): filter condition. Defaults to {}.
             return_fields (list, optional): select the fields to return. Defaults to None.
             return_cnt (int, optional): getting document total quantity. Defaults to all.
             page_size (int, optional): quantity returned each time. Defaults to 500.
@@ -216,7 +216,7 @@ class AsyncMongoDB:
             if item_list:
                 yield item_list
 
-            log_switch or logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | total {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | total {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
 
             if fetch_cnt == return_cnt:
                 break
@@ -228,12 +228,12 @@ class AsyncMongoDB:
             # 更新查询条件
             filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
 
-    async def find_one(self, coll_name: str, filter: dict = None, return_fields: list = None):
+    async def find_one(self, coll_name: str, filter: dict = {}, return_fields: list = None):
         """Get a single document from the database.
 
         Args:
             coll_name (str): collection name.
-            filter (dict, optional): filter condition. Defaults to None.
+            filter (dict, optional): filter condition. Defaults to {}.
             return_fields (list, optional): select the fields to return. Defaults to None.
 
         Returns:
