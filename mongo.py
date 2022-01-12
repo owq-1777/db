@@ -201,23 +201,15 @@ class AsyncMongoDB:
 
         collect = self.get_collection(coll_name)
 
-        # 查询数量
-        if (total_cnt := await self.get_count(coll_name, filter)) == 0:
-            logger.warning(f'mongo:{collect.full_name} | query null {filter}')
-            return
-
-        # 返回数量
-        return_cnt = total_cnt if return_cnt == 'all' or 0 > return_cnt > total_cnt else return_cnt
+        if (total_cnt := await self.get_count(coll_name, filter)) == 0: # 查询数量
+            return logger.warning(f'mongo:{collect.full_name} | query null {filter}')
+        return_cnt = total_cnt if return_cnt == 'all' or 0 > return_cnt > total_cnt else return_cnt # 返回数量
 
         # * _id 升序分页查询 限制缓存大小 防止服务器内存暴毙
         fetch_cnt, item_list, filters = 0, [], filter
         projection = dict.fromkeys(return_fields, 1) if return_fields else None # 返回字段
         cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
         while True:
-
-            # 最后一页 更新缓存大小
-            if fetch_cnt+page_size > return_cnt:
-                cache_size = return_cnt-fetch_cnt
 
             cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
 
@@ -234,6 +226,10 @@ class AsyncMongoDB:
 
             if fetch_cnt == return_cnt:
                 break
+
+            # 最后一页 更新缓存大小
+            if fetch_cnt+page_size > return_cnt:
+                cache_size = return_cnt-fetch_cnt
 
             # 更新查询条件
             filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
