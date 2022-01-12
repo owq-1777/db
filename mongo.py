@@ -241,8 +241,12 @@ class AsyncMongoDB:
             coll_name (str): collection name.
             filter (dict, optional): filter condition. Defaults to None.
             return_fields (list, optional): select the fields to return. Defaults to None.
+
+        Returns:
+            dict: document or {}
         """
-        projection = dict.fromkeys(return_fields, 1) if return_fields else None  # 返回字段
+
+        projection = dict.fromkeys(return_fields, 1) if return_fields else None
         return await self.get_collection(coll_name).find_one(filter, projection) or {}
 
     # ------------------------------------  ------------------------------------ #
