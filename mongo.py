@@ -211,8 +211,9 @@ class AsyncMongoDB:
                 item_list.append(item)
                 fetch_cnt += 1
                 if len(item_list) == page_size:
+                    page_id = item_list[-1]['_id']
                     yield item_list
-                    page_id, item_list = item_list[-1]['_id'], []
+                    item_list = []
             if item_list:
                 yield item_list
 
