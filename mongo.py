@@ -4,7 +4,7 @@
 @File   :   mongo_async.py
 @Time   :   2021/12/21 16:19
 @Author :   Blank
-@Version:   2.0
+@Version:   2.1
 @Desc   :   Mongo pcblib
 '''
 
@@ -19,6 +19,13 @@ from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 from pymongo.operations import DeleteOne, InsertOne, UpdateOne
 from pymongo.results import BulkWriteResult
+
+# ------------------------------------ CRUD ------------------------------------ #
+
+# TODO 分离函数功能
+
+
+# ------------------------------------  ------------------------------------ #
 
 
 class MongoDB:
@@ -93,7 +100,7 @@ class AsyncMongoDB:
 
     # ------------------------------------  ------------------------------------ #
 
-    async def create_index(self, coll_name: str, keys: Sequence, sort_type = pymongo.ASCENDING, unique=False):
+    async def create_index(self, coll_name: str, keys: Sequence, sort_type=pymongo.ASCENDING, unique=False):
         """Creates an index on this collection.
 
         Args:
@@ -120,13 +127,15 @@ class AsyncMongoDB:
 
     # ------------------------------------ CRUD ------------------------------------ #
 
-    async def write(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
+    async def write(self, coll_name: str, documents: list[dict], log_switch: bool = True, collect: Collection = None) -> bool:
+
         """Batch write documents.
 
         Args:
             coll_name (str): collection name.
             documents (list[dict]): write documents.
             log_switch (bool, optional): info level log switch. Defaults to True.
+            collect (Collection, optional): Specifying collection links. Defaults to None.
 
         Returns:
             bool: operating result.
@@ -139,7 +148,7 @@ class AsyncMongoDB:
         operate_list = [UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True) if item.get('_id') != None else InsertOne(item) for item in documents]
 
         try:
-            collect = self.get_collection(coll_name)
+            collect = collect or self.get_collection(coll_name)
             result: BulkWriteResult = await collect.bulk_write(operate_list, ordered=False)
             log_switch and logger.info(f'mongo:{collect.full_name} | insert {result.inserted_count} | updata {result.upserted_count} | modified {result.matched_count} | total {len(documents)}')
             return True
@@ -205,7 +214,11 @@ class AsyncMongoDB:
         cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
         while True:
 
-            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
+            # 最后一页时 更新缓存大小
+            if fetch_cnt+page_size > return_cnt:
+                page_size = cache_size = return_cnt-fetch_cnt
+
+            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size).batch_size(page_size)
 
             async for item in cursor:
                 item_list.append(item)
@@ -214,17 +227,11 @@ class AsyncMongoDB:
                     page_id = item_list[-1]['_id']
                     yield item_list
                     item_list = []
-            if item_list:
-                yield item_list
 
-            log_switch and logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | total {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
 
-            if fetch_cnt == return_cnt:
+            if fetch_cnt >= return_cnt:
                 break
-
-            # 最后一页时 更新缓存大小
-            if fetch_cnt+page_size > return_cnt:
-                cache_size = return_cnt-fetch_cnt
 
             # 更新查询条件
             filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
@@ -263,7 +270,7 @@ class AsyncMongoDB:
         """ Copy the collection to the new a collection. """
 
         async for items in self.getter(old_name, page_size=5000):
-            await self.write(new_name, items, log_switch=False)
+            await self.write(coll_name=new_name, documents=items, log_switch=False)
         logger.info(f'{old_name} copy to {new_name} done!')
 
 
