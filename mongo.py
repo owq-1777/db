@@ -93,21 +93,21 @@ class AsyncMongoDB:
 
     # ------------------------------------  ------------------------------------ #
 
-    async def create_index(self, coll_name: str, keys: Sequence, sort: int = 1, unique=True):
+    async def create_index(self, coll_name: str, keys: Sequence, sort_type = pymongo.ASCENDING, unique=False):
         """Creates an index on this collection.
 
         Args:
-            coll_name ([type]): collection name
-            keys (Sequence): The key that creates the index(Single or compound)
-            sort (int, optional): 1=Ascending, -1=Descending. Defaults to 1.
-            unique (bool, optional): [description]. Defaults to True.
+            coll_name ([type]): collection name.
+            keys (Sequence): The key that creates the index(Single or compound).
+            sort_type (int, optional): Type of index created. Defaults to pymongo.ASCENDING.
+                `pymongo.ASCENDING`, `pymongo.DESCENDING`, `pymongo.GEO2D`, `pymongo.GEOHAYSTACK`, `pymongo.GEOSPHERE`, `pymongo.HASHED`, `pymongo.TEXT`
+            unique (bool, optional): creates a uniqueness constraint on the index. Defaults to True.
 
         """
         coll = self.get_collection(coll_name)
-        sort_type = pymongo.ASCENDING if sort == 1 else pymongo.DESCENDING
-        _keys = [(key, sort_type) for key in keys]
+        _keys = [(key, sort_type) for key in keys] if isinstance(keys, (list, tuple)) else [(keys, sort_type)]
 
-        await coll.create_index(_keys, unique=unique)
+        return await coll.create_index(_keys, unique=unique, background=True)
 
     async def get_index_info(self, coll_name: str):
         """ Get collection index information. """
