@@ -8,6 +8,8 @@
 @Desc   :   Redis pcblib
 '''
 
+import glob
+import os
 from typing import Any, Dict, Union
 
 import aioredis  # # pip install aioredis==2
@@ -34,6 +36,17 @@ class AsyncRedisDB(aioredis.Redis):
     def __init__(self, *, host: str = "localhost", port: int = 6379, db: Union[str, int] = 0, password: str = None, socket_timeout: float = None, socket_connect_timeout: float = None, socket_keepalive: bool = None, socket_keepalive_options: Dict[str, Any] = None, connection_pool: ConnectionPool = None, unix_socket_path: str = None, encoding: str = "utf-8", encoding_errors: str = "strict", decode_responses: bool = False, retry_on_timeout: bool = False, ssl: bool = False, ssl_keyfile: str = None, ssl_certfile: str = None, ssl_cert_reqs: str = "required", ssl_ca_certs: str = None, ssl_check_hostname: bool = False, max_connections: int = None, single_connection_client: bool = False, health_check_interval: int = 0, client_name: str = None, username: str = None):
         """ 继承 aioredis.Redis 的封装类"""
         super().__init__(host=host, port=port, db=db, password=password, socket_timeout=socket_timeout, socket_connect_timeout=socket_connect_timeout, socket_keepalive=socket_keepalive, socket_keepalive_options=socket_keepalive_options, connection_pool=connection_pool, unix_socket_path=unix_socket_path, encoding=encoding, encoding_errors=encoding_errors, decode_responses=decode_responses, retry_on_timeout=retry_on_timeout, ssl=ssl, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, ssl_cert_reqs=ssl_cert_reqs, ssl_ca_certs=ssl_ca_certs, ssl_check_hostname=ssl_check_hostname, max_connections=max_connections, single_connection_client=single_connection_client, health_check_interval=health_check_interval, client_name=client_name, username=username)
+        self.init_scripts()
+
+    def init_scripts(self, script_dir=None):
+        self._scripts = {}
+        if not script_dir:
+            script_dir = os.path.join(os.path.dirname(__file__), 'scripts')
+        for filename in glob.glob(os.path.join(script_dir, '*.lua')):
+            with open(filename, 'r') as fh:
+                script_obj = self.register_script(fh.read())
+                script_name = os.path.splitext(os.path.basename(filename))[0]
+                self._scripts[script_name] = script_obj
 
     async def zset_set_by_score(self, name: str, min: int, max: int, score: int, num: int = '') -> list:
         """ 获取指定区间数据并修改分数为指定值 """
