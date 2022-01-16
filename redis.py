@@ -28,114 +28,60 @@ def get_asyn_redis(host: str = '127.0.0.1', port: int = 6379, password: str = No
     )
     if password:
         conf['password'] = password
-    pool = aioredis.ConnectionPool.from_url(f"redis://{host}",**conf)
+    pool = aioredis.ConnectionPool.from_url(f"redis://{host}", **conf)
     return AsyncRedisDB(connection_pool=pool, **kwargs)
+
 
 class AsyncRedisDB(aioredis.Redis):
 
     def __init__(self, *, host: str = "localhost", port: int = 6379, db: Union[str, int] = 0, password: str = None, socket_timeout: float = None, socket_connect_timeout: float = None, socket_keepalive: bool = None, socket_keepalive_options: Dict[str, Any] = None, connection_pool: ConnectionPool = None, unix_socket_path: str = None, encoding: str = "utf-8", encoding_errors: str = "strict", decode_responses: bool = False, retry_on_timeout: bool = False, ssl: bool = False, ssl_keyfile: str = None, ssl_certfile: str = None, ssl_cert_reqs: str = "required", ssl_ca_certs: str = None, ssl_check_hostname: bool = False, max_connections: int = None, single_connection_client: bool = False, health_check_interval: int = 0, client_name: str = None, username: str = None):
         """ 继承 aioredis.Redis 的封装类"""
-        super().__init__(host=host, port=port, db=db, password=password, socket_timeout=socket_timeout, socket_connect_timeout=socket_connect_timeout, socket_keepalive=socket_keepalive, socket_keepalive_options=socket_keepalive_options, connection_pool=connection_pool, unix_socket_path=unix_socket_path, encoding=encoding, encoding_errors=encoding_errors, decode_responses=decode_responses, retry_on_timeout=retry_on_timeout, ssl=ssl, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, ssl_cert_reqs=ssl_cert_reqs, ssl_ca_certs=ssl_ca_certs, ssl_check_hostname=ssl_check_hostname, max_connections=max_connections, single_connection_client=single_connection_client, health_check_interval=health_check_interval, client_name=client_name, username=username)
+        super().__init__(host=host, port=port, db=db, password=password, socket_timeout=socket_timeout, socket_connect_timeout=socket_connect_timeout, socket_keepalive=socket_keepalive, socket_keepalive_options=socket_keepalive_options, connection_pool=connection_pool, unix_socket_path=unix_socket_path, encoding=encoding, encoding_errors=encoding_errors, decode_responses=decode_responses,
+                         retry_on_timeout=retry_on_timeout, ssl=ssl, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, ssl_cert_reqs=ssl_cert_reqs, ssl_ca_certs=ssl_ca_certs, ssl_check_hostname=ssl_check_hostname, max_connections=max_connections, single_connection_client=single_connection_client, health_check_interval=health_check_interval, client_name=client_name, username=username)
         self.init_scripts()
 
     def init_scripts(self, script_dir=None):
+        """ 加载所有lua脚本 默认从scripts目录下获取 """
         self._scripts = {}
-        if not script_dir:
-            script_dir = os.path.join(os.path.dirname(__file__), 'scripts')
-        for filename in glob.glob(os.path.join(script_dir, '*.lua')):
-            with open(filename, 'r') as fh:
-                script_obj = self.register_script(fh.read())
-                script_name = os.path.splitext(os.path.basename(filename))[0]
+        script_dir = script_dir or os.path.join(os.path.dirname(__file__), 'scripts')
+        for file_path in glob.glob(os.path.join(script_dir, '*.lua')):
+            with open(file_path, 'r') as f:
+                script_obj = self.register_script(f.read())
+                script_name = os.path.splitext(os.path.basename(file_path))[0]
                 self._scripts[script_name] = script_obj
+
+    async def run_script(self, script_name, keys=None, args=None):
+        """
+        Execute a walrus script with the given arguments.
+
+        :param script_name: The base name of the script to execute.
+        :param list keys: Keys referenced by the script.
+        :param list args: Arguments passed in to the script.
+        :returns: Return value of script.
+
+        .. note:: Redis scripts require two parameters, ``keys``
+            and ``args``, which are referenced in lua as ``KEYS``
+            and ``ARGV``.
+        """
+        return await self._scripts[script_name](keys, args)
 
     async def zset_set_by_score(self, name: str, min: int, max: int, score: int, num: int = '') -> list:
         """ 获取指定区间数据并修改分数为指定值 """
-
-        script = self.register_script("""
-            local key = KEYS[1]
-            local min_score = ARGV[1]
-            local max_score = ARGV[2]
-            local set_score = ARGV[3]
-            local num = ARGV[4]
-
-            -- get zset data
-            local datas = nil
-            if num ~= '' then
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores', 'limit', 0, num)
-            else
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores')
-            end
-
-            -- set score
-            local item_list = {}
-            for i=1, #datas, 2 do
-                table.insert(item_list, datas[i])
-                redis.call('zadd', key, set_score, datas[i])
-            end
-            return item_list
-        """)
-        return await script(keys=[name], args=[min, max, score, num])
+        return await self.run_script('zset_set_by_score', keys=[name], args=[min, max, score, num])
 
     async def zset_increase_by_score(self, name: str, min: int, max: int, increment: int, num: int = '') -> list:
         """ 获取指定区间数据并修改分数加上增量 """
-
-        script = self.register_script("""
-            local key = KEYS[1]
-            local min_score = ARGV[1]
-            local max_score = ARGV[2]
-            local increase = ARGV[3]
-            local num = ARGV[4]
-
-            -- get zset data
-            local datas = nil
-            if num ~= '' then
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores', 'limit', 0, num)
-            else
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores')
-            end
-
-            -- set score
-            local item_list = {}
-            for i=1, #datas, 2 do
-                table.insert(item_list, datas[i])
-                redis.call('zincrby', key, increase, datas[i])
-            end
-            return item_list
-        """)
-        return await script(keys=[name], args=[min, max, increment, num])
+        return await self.run_script('zset_increase_by_score', keys=[name], args=[min, max, increment, num])
 
     async def zset_del_by_score(self, name: str, min: int, max: int, num: int = '') -> list:
         """ 获取指定区间数据并删除 """
-
-        script = self.register_script("""
-            local key = KEYS[1]
-            local min_score = ARGV[1]
-            local max_score = ARGV[2]
-            local num = ARGV[3]
-
-            -- get zset data
-            local datas = nil
-            if num ~= '' then
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores', 'limit', 0, num)
-            else
-                datas = redis.call('zrangebyscore', key, min_score, max_score, 'withscores')
-            end
-
-            -- del data
-            local item_list = {}
-            for i=1, #datas, 2 do
-                table.insert(item_list, datas[i])
-                redis.call('zrem', key, datas[i])
-            end
-            return item_list
-        """)
-        return await script(keys=[name], args=[min, max, num])
+        return await self.run_script('zset_del_by_score', keys=[name], args=[min, max, num])
 
     async def zset_fetch_by_sorce(self, name: str,  min: int, max: int, num: int = None) -> list:
         """ 获取指定区间数据 """
         return await self.zrangebyscore(name, min, max, 0, num)
 
-    async def _write_zset(self, name:str, data:list, score:int=0):
+    async def _write_zset(self, name: str, data: list, score: int = 0):
         """ 批量写入zset """
         result = await self.zadd(name, dict.fromkeys(data, score))
         logger.debug(f'redis:{name} | insert {result} | updata {len(data)-result} | total {len(data)}')
@@ -148,7 +94,7 @@ class AsyncRedisDB(aioredis.Redis):
         else:
             logger.error(f'param error | key_type:{key_type} | correct in [str,list,set,zset,hash]')
 
-    async def get_conut(self, name:str):
+    async def get_conut(self, name: str):
         """ 获取数据量 """
 
         key_type = await self.type(name)
@@ -165,7 +111,7 @@ class AsyncRedisDB(aioredis.Redis):
         else:
             return False
 
-    async def getter(self, name: str, page_size:int = 500):
+    async def getter(self, name: str, page_size: int = 500):
         """ 获取key全部数据 page_size批量获取针对list,set,zset有效"""
 
         key_type = await self.type(name)
@@ -176,7 +122,7 @@ class AsyncRedisDB(aioredis.Redis):
         elif key_type == 'list':
             i = 0
             while i := i+1:
-                item_list =  await self.lrange(name, page_size * (i-1), page_size * i - 1)
+                item_list = await self.lrange(name, page_size * (i-1), page_size * i - 1)
                 if len(item_list) < page_size:
                     break
                 yield item_list
