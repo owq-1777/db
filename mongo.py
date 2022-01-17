@@ -156,7 +156,7 @@ class AsyncMongoDB:
             logger.error(e.details)
             return False
 
-    async def delect(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
+    async def delete(self, coll_name: str, documents: list[dict], log_switch: bool = True) -> bool:
         """Delete mongo document data.
 
         Args:
