@@ -214,7 +214,11 @@ class AsyncMongoDB:
         cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
         while True:
 
-            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size)
+            # 最后一页时 更新缓存大小
+            if fetch_cnt+page_size > return_cnt:
+                cache_size = return_cnt-fetch_cnt
+
+            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size).batch_size(page_size)
 
             async for item in cursor:
                 item_list.append(item)
@@ -223,15 +227,13 @@ class AsyncMongoDB:
                     page_id = item_list[-1]['_id']
                     yield item_list
                     item_list = []
+            if item_list:
+                yield item_list
 
             log_switch and logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
 
             if fetch_cnt >= return_cnt:
                 break
-
-            # 最后一页时 更新缓存大小
-            if fetch_cnt+page_size > return_cnt:
-                page_size = cache_size = return_cnt-fetch_cnt
 
             # 更新查询条件
             filters = {'$and': [{'_id': {'$gt': page_id}}, filter]}
