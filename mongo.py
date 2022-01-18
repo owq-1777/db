@@ -8,7 +8,7 @@
 @Desc   :   Mongo pcblib
 '''
 
-from typing import Sequence, Union
+from typing import Sequence
 
 import motor.motor_asyncio
 import pymongo
@@ -19,6 +19,7 @@ from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 from pymongo.operations import DeleteOne, InsertOne, UpdateOne
 from pymongo.results import BulkWriteResult
+
 
 # ------------------------------------ CRUD ------------------------------------ #
 

@@ -9,6 +9,7 @@
 '''
 
 import glob
+import json
 import os
 from typing import Any, Dict, Union
 
@@ -83,7 +84,7 @@ class AsyncRedisDB(aioredis.Redis):
 
     async def _write_zset(self, name: str, data: list, score: int = 0):
         """ 批量写入zset """
-        result = await self.zadd(name, dict.fromkeys(data, score))
+        result = await self.zadd(name, dict.fromkeys([json.dumps(i) for i in data], score))
         logger.debug(f'redis:{name} | insert {result} | updata {len(data)-result} | total {len(data)}')
         return result
 
