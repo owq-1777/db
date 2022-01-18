@@ -185,7 +185,8 @@ class AsyncMongoDB:
             return False
 
     async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
-                     return_cnt: int = 'all', page_size: int = 500, log_switch: bool = True):
+                     return_cnt: int = 'all', page_size: int = 500, sort_query: bool = True,
+                     log_switch: bool = True):
         """ Batch get document generator.
 
         Args:
@@ -194,6 +195,7 @@ class AsyncMongoDB:
             return_fields (list, optional): select the fields to return. Defaults to None.
             return_cnt (int, optional): getting document total quantity. Defaults to all.
             page_size (int, optional): quantity returned each time. Defaults to 500.
+            sort_query (bool, optional): _id sort query. Defaults to True.
             log_switch (bool, optional): info level log switch. Defaults to True.
 
         Yields:
@@ -208,29 +210,30 @@ class AsyncMongoDB:
 
         return_cnt = total_cnt if return_cnt == 'all' or 0 > return_cnt > total_cnt else return_cnt  # 返回数量
 
-        # * _id 升序分页查询 限制缓存大小 防止服务器内存暴毙
         fetch_cnt, item_list, filters = 0, [], filter
         projection = dict.fromkeys(return_fields, 1) if return_fields else None  # 返回字段
-        cache_size = return_cnt if return_cnt < page_size*50 else page_size*50  # 每次查询缓存大小
+        cache_size = return_cnt if return_cnt < page_size*50 else page_size*50 if sort_query else return_cnt  # 查询大小
         while True:
 
             # 最后一页时 更新缓存大小
             if fetch_cnt+page_size > return_cnt:
                 cache_size = return_cnt-fetch_cnt
 
-            cursor = collect.find(filters, projection).sort('_id', pymongo.ASCENDING).limit(cache_size).batch_size(page_size)
+            cursor = collect.find(filters, projection).limit(cache_size).batch_size(page_size)
+            sort_query and cursor.sort('_id', pymongo.ASCENDING)
 
             async for item in cursor:
                 item_list.append(item)
                 fetch_cnt += 1
                 if len(item_list) == page_size:
                     page_id = item_list[-1]['_id']
+                    sort_query and log_switch and logger.info(f'mongo:{collect.full_name} | get {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt}')
                     yield item_list
                     item_list = []
             if item_list:
                 yield item_list
 
-            log_switch and logger.info(f'mongo:{collect.full_name} | getter {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | get {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
 
             if fetch_cnt >= return_cnt:
                 break
