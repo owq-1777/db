@@ -8,7 +8,7 @@
 @Desc   :   Mongo pcblib
 '''
 
-from typing import Sequence
+from typing import Sequence, Union
 
 import motor.motor_asyncio
 import pymongo
@@ -19,7 +19,6 @@ from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 from pymongo.operations import DeleteOne, InsertOne, UpdateOne
 from pymongo.results import BulkWriteResult
-
 
 # ------------------------------------ CRUD ------------------------------------ #
 
@@ -101,12 +100,12 @@ class AsyncMongoDB:
 
     # ------------------------------------  ------------------------------------ #
 
-    async def create_index(self, coll_name: str, keys: Sequence, sort_type=pymongo.ASCENDING, unique=False):
+    async def create_index(self, coll_name: str, keys: Union[Sequence, str], sort_type=pymongo.ASCENDING, unique=False):
         """Creates an index on this collection.
 
         Args:
-            coll_name ([type]): collection name.
-            keys (Sequence): The key that creates the index(Single or compound).
+            coll_name (str): collection name.
+            keys (Union[Sequence,str]): The key that creates the index(Single or compound).
             sort_type (int, optional): Type of index created. Defaults to pymongo.ASCENDING.
                 `pymongo.ASCENDING`, `pymongo.DESCENDING`, `pymongo.GEO2D`, `pymongo.GEOHAYSTACK`, `pymongo.GEOSPHERE`, `pymongo.HASHED`, `pymongo.TEXT`
             unique (bool, optional): creates a uniqueness constraint on the index. Defaults to True.
@@ -128,13 +127,13 @@ class AsyncMongoDB:
 
     # ------------------------------------ CRUD ------------------------------------ #
 
-    async def write(self, coll_name: str, documents: list[dict], log_switch: bool = True, collect: Collection = None) -> bool:
-
+    async def write(self, coll_name: str, documents: list[dict], unique_field: str = None, log_switch: bool = True, collect: Collection = None) -> bool:
         """Batch write documents.
 
         Args:
             coll_name (str): collection name.
             documents (list[dict]): write documents.
+            unique_field (str, optional): Unique field condition when updated. Defaults to None.
             log_switch (bool, optional): info level log switch. Defaults to True.
             collect (Collection, optional): Specifying collection links. Defaults to None.
 
@@ -145,8 +144,11 @@ class AsyncMongoDB:
             logger.warning('documents is null')
             return True
 
-        # 有_id则更新数据 无则插入
-        operate_list = [UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True) if item.get('_id') != None else InsertOne(item) for item in documents]
+        # 有唯一键则更新数据 无则插入
+        if unique_field:
+            operate_list = [UpdateOne({'$and':[{'_id':item['_id']}, {unique_field:item[unique_field]}]}, {'$set': item}, upsert=True) if item.get('_id') != None else UpdateOne({unique_field: item[unique_field]}, {'$set': item}, upsert=True) for item in documents]
+        else:
+            operate_list = [UpdateOne({'_id': item['_id']}, {'$set': item}, upsert=True) if item.get('_id') != None else InsertOne(item) for item in documents]
 
         try:
             collect = collect or self.get_collection(coll_name)
@@ -185,9 +187,7 @@ class AsyncMongoDB:
             logger.error(e.details)
             return False
 
-    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None,
-                     return_cnt: int = 'all', page_size: int = 500, sort_query: bool = True,
-                     log_switch: bool = True):
+    async def getter(self, coll_name: str, filter: dict = {}, return_fields: list = None, return_cnt: int = 'all', page_size: int = 500, sort_query: bool = True, log_switch: bool = True):
         """ Batch get document generator.
 
         Args:
@@ -234,7 +234,7 @@ class AsyncMongoDB:
             if item_list:
                 yield item_list
 
-            log_switch and logger.info(f'mongo:{collect.full_name} | get {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt} | end \'_id\' {type(page_id)}:{str(page_id)}')
+            log_switch and logger.info(f'mongo:{collect.full_name} | get {fetch_cnt/return_cnt*100:>7.2f}% | fetch {fetch_cnt}')
 
             if fetch_cnt >= return_cnt:
                 break
@@ -272,11 +272,11 @@ class AsyncMongoDB:
         # TODO admin权限判断处理
         await self.get_collection(old_name).rename(new_name)
 
-    async def copy_collection(self, old_name: str, new_name: str):
+    async def copy_collection(self, old_name: str, new_name: str, unique_field: str = '_id',):
         """ Copy the collection to the new a collection. """
 
         async for items in self.getter(old_name, page_size=5000):
-            await self.write(coll_name=new_name, documents=items, log_switch=False)
+            await self.write(coll_name=new_name, documents=items, unique_field=unique_field, log_switch=False)
         logger.info(f'{old_name} copy to {new_name} done!')
 
 
